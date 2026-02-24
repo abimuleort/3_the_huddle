@@ -2,7 +2,7 @@ import selectors
 import socket
 import datetime
 
-HOST = '0.0.0.0'
+HOST = "0.0.0.0"
 PORT = 12345
 BUFFER = 4096
 
@@ -15,27 +15,27 @@ def timestamp():
     return datetime.datetime.now().strftime("%H:%M:%S")
 
 
-def loguear(mensaje):
-    log_file.write(mensaje + "\n")
+def login(message):
+    log_file.write(message + "\n")
     log_file.flush()
 
 
-def broadcast(mensaje, remitente=None):
+def broadcast(message, sender=None):
     muertos = []
     for sock in clients:
-        if sock != remitente:
+        if sock != sender:
             try:
-                sock.send(mensaje.encode("utf-8"))
+                sock.send(message.encode("utf-8"))
             except Exception:
                 muertos.append(sock)
     for sock in muertos:
-        desconectar(sock, motivo="socket muerto en broadcast")
+        disconnect(sock, motive="socket muerto en broadcast")
 
 
-def desconectar(sock, motivo="desconexión"):
+def disconnect(sock, motive="desconexión"):
     if sock in clients:
-        nombre = clients[sock]["nombre"]
-        mensaje = f"[{timestamp()}] *** {nombre} abandonó el chat ({motivo}) ***"
+        name = clients[sock]["nombre"]
+        message = f"[{timestamp()}] *** {name} abandonó el chat ({motive}) ***"
 
         del clients[sock]
         try:
@@ -47,23 +47,23 @@ def desconectar(sock, motivo="desconexión"):
         except Exception:
             pass
 
-        broadcast(mensaje, remitente=None)
-        loguear(mensaje)
-        print(f"Conexión cerrada: {nombre} — {motivo}")
+        broadcast(message, sender=None)
+        login(message)
+        print(f"Conexión cerrada: {name} — {motive}")
 
 
-def aceptar_cliente(server_sock):
+def accept_client(server_sock):
     conn, addr = server_sock.accept()
     conn.setblocking(True)
 
     try:
         conn.send("Ingresá tu nombre de usuario: ".encode("utf-8"))
         conn.settimeout(30)
-        nombre = conn.recv(BUFFER).decode("utf-8").strip()
-        if not nombre:
-            nombre = f"Anonimo_{addr[1]}"
+        name = conn.recv(BUFFER).decode("utf-8").strip()
+        if not name:
+            name = f"Anonimo_{addr[1]}"
     except socket.timeout:
-        nombre = f"Anonimo_{addr[1]}"
+        name = f"Anonimo_{addr[1]}"
     except (ConnectionResetError, OSError):
         conn.close()
         return
@@ -71,37 +71,37 @@ def aceptar_cliente(server_sock):
     conn.setblocking(False)
 
     clients[conn] = {
-        "nombre": nombre,
+        "name": name,
         "addr": addr,
         "muted": False
     }
 
     sel.register(conn, selectors.EVENT_READ, data="client")
 
-    mensaje_bienvenida = f"[{timestamp()}] *** {nombre} se unió al chat ***\n"
-    broadcast(mensaje_bienvenida, remitente=None)
-    loguear(mensaje_bienvenida.strip())
+    mensaje_bienvenida = f"[{timestamp()}] *** {name} se unió al chat ***\n"
+    broadcast(mensaje_bienvenida, sender=None)
+    login(mensaje_bienvenida.strip())
     print(mensaje_bienvenida.strip())
 
 
-def manejar_cliente(sock):
+def manage_client(sock):
     try:
         data = sock.recv(BUFFER)
 
         if not data:
-            desconectar(sock, motivo="desconexión limpia")
+            disconnect(sock, motive="desconexión limpia")
             return
 
-        texto = data.decode("utf-8").strip()
-        nombre = clients[sock]["nombre"]
+        text = data.decode("utf-8").strip()
+        name = clients[sock]["name"]
 
-        if texto == "/exit":
-            desconectar(sock, motivo="salida voluntaria")
+        if text == "/exit":
+            disconnect(sock, motive="salida voluntaria")
 
-        elif texto.startswith("/mute "):
-            objetivo_nombre = texto[6:].lstrip("@").strip()
+        elif text.startswith("/mute "):
+            objetivo_nombre = text[6:].lstrip("@").strip()
             objetivo_sock = next(
-                (s for s, info in clients.items() if info["nombre"] == objetivo_nombre),
+                (s for s, info in clients.items() if info["name"] == objetivo_nombre),
                 None
             )
             if objetivo_sock:
@@ -115,12 +115,12 @@ def manejar_cliente(sock):
                 sock.send("[Estás muteado, nadie te escucha]\n".encode())
                 return
 
-            mensaje = f"[{timestamp()}] {nombre}: {texto}\n"
-            broadcast(mensaje, remitente=sock)
-            loguear(mensaje.strip())
+            message = f"[{timestamp()}] {name}: {text}\n"
+            broadcast(message, sender=sock)
+            login(message.strip())
 
     except (ConnectionResetError, OSError):
-        desconectar(sock, motivo="caída inesperada")
+        disconnect(sock, motivo="caída inesperada")
 
 
 def main():
@@ -138,9 +138,9 @@ def main():
             eventos = sel.select(timeout=1)
             for key, mask in eventos:
                 if key.data == "server":
-                    aceptar_cliente(key.fileobj)
+                    accept_client(key.fileobj)
                 else:
-                    manejar_cliente(key.fileobj)
+                    manage_client(key.fileobj)
     except KeyboardInterrupt:
         print("\nServidor detenido.")
     finally:
