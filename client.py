@@ -1,82 +1,68 @@
 import socket
-import selectors
-import types
-from datetime import datetime
+import time
+from threading import Thread
 
-HOST = '0.0.0.0'
-PORT = 5000
+HOST = '127.0.0.1'
+PORT = 12345
+BUFFER = 4096
+MAX_RETRIES = 3
 
-selector = selectors.DefaultSelector()
-clients = {}  # socket: username
+def connect_retries():
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((HOST, PORT))
+            print("Conectado al servidor.")
+            return sock
+        except (ConnectionRefusedError, OSError):
+            print(f"Intento {attempt} fallido. Reintentando en 3s...")
+            time.sleep(3)
+    return None
 
+def receive_messages(sock):
+    while True:
+        try:
+            data = sock.recv(BUFFER)
+            if not data:
+                print("\n[Servidor cerro la conexion]")
+                sock.close()
+                break
+            print(data.decode("utf-8"))
+        except (ConnectionResetError, OSError):
+            print("\n[Conexion perdida con el servidor]")
+            sock.close()
+            break
 
-def broadcast(message, sender_socket=None):
-    for client in list(clients.keys()):
-        if client != sender_socket:
-            try:
-                client.sendall(message.encode())
-            except:
-                remove_client(client)
+def send_messages(sock):
+    while True:
+        try:
+            msg = input()
+            if not msg:
+                continue
+            sock.send(msg.encode("utf-8"))
 
-
-def remove_client(sock):
-    username = clients.get(sock, "Unknown")
-    print(f"[INFO] {username} disconnected.")
-    selector.unregister(sock)
-    sock.close()
-    del clients[sock]
-    broadcast(f"[SYSTEM] {username} left the chat.\n")
-
-
-def accept_connection(server_socket):
-    conn, addr = server_socket.accept()
-    print(f"[NEW CONNECTION] {addr}")
-    conn.setblocking(False)
-    selector.register(conn, selectors.EVENT_READ, read_message)
-
-
-def read_message(conn):
-    try:
-        data = conn.recv(1024).decode().strip()
-
-        if not data:
-            remove_client(conn)
-            return
-
-        if conn not in clients:
-
-            clients[conn] = data
-            broadcast(f"[SYSTEM] {data} joined the chat.\n")
-            return
-
-        username = clients[conn]
-
-        if data == "/exit":
-            remove_client(conn)
-            return
-
-        if data == "/help":
-            conn.sendall("Commands: /exit, /help\n".encode())
-            return
-
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        message = f"[{timestamp}] {username}: {data}\n"
-
-        print(message.strip())
-        broadcast(message, conn)
-
-        # Log
-        with open("chat_log.txt", "a", encoding="utf-8") as f:
-            f.write(message)
-
-    except:
-        remove_client(conn)
-
+            if msg == "/exit":
+                print("Saliendo...")
+                sock.close()
+                break
+        except (BrokenPipeError, OSError):
+            print("[No se pudo enviar. Conexion rota]")
+            break
+        except KeyboardInterrupt:
+            sock.send("/exit".encode("utf-8"))
+            sock.close()
+            break
 
 def main():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = connect_retries()
+    if sock is None:
+        print("No se pudo conectar al servidor. Saliendo...")
+        return
 
-
+    thread_receive = Thread(target=receive_messages, args=(sock,))
+    thread_receive.daemon = True
+    thread_receive.start()
+    send_messages(sock)
 
 if __name__ == "__main__":
-    main()
+    main()  

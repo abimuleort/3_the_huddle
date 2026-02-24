@@ -1,93 +1,152 @@
-import socket
 import selectors
-import types
-from datetime import datetime
+import socket
+import datetime
 
 HOST = '0.0.0.0'
-PORT = 5000
+PORT = 12345
+BUFFER = 4096
 
-selector = selectors.DefaultSelector()
-clients = {}  # socket: username
+clients = {}
+sel = selectors.DefaultSelector()
+log_file = open("chat.log", "a", encoding="utf-8")
 
 
-def broadcast(message, sender_socket=None):
-    for client in list(clients.keys()):
-        if client != sender_socket:
+def timestamp():
+    return datetime.datetime.now().strftime("%H:%M:%S")
+
+
+def loguear(mensaje):
+    log_file.write(mensaje + "\n")
+    log_file.flush()
+
+
+def broadcast(mensaje, remitente=None):
+    muertos = []
+    for sock in clients:
+        if sock != remitente:
             try:
-                client.sendall(message.encode())
-            except:
-                remove_client(client)
+                sock.send(mensaje.encode("utf-8"))
+            except Exception:
+                muertos.append(sock)
+    for sock in muertos:
+        desconectar(sock, motivo="socket muerto en broadcast")
 
 
-def remove_client(sock):
-    username = clients.get(sock, "Unknown")
-    print(f"[INFO] {username} disconnected.")
-    selector.unregister(sock)
-    sock.close()
-    del clients[sock]
-    broadcast(f"[SYSTEM] {username} left the chat.\n")
+def desconectar(sock, motivo="desconexión"):
+    if sock in clients:
+        nombre = clients[sock]["nombre"]
+        mensaje = f"[{timestamp()}] *** {nombre} abandonó el chat ({motivo}) ***"
+
+        del clients[sock]
+        try:
+            sel.unregister(sock)
+        except Exception:
+            pass
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+        broadcast(mensaje, remitente=None)
+        loguear(mensaje)
+        print(f"Conexión cerrada: {nombre} — {motivo}")
 
 
-def accept_connection(server_socket):
-    conn, addr = server_socket.accept()
-    print(f"[NEW CONNECTION] {addr}")
-    conn.setblocking(False)
-    selector.register(conn, selectors.EVENT_READ, read_message)
+def aceptar_cliente(server_sock):
+    conn, addr = server_sock.accept()
+    conn.setblocking(True)
 
-
-def read_message(conn):
     try:
-        data = conn.recv(1024).decode().strip()
+        conn.send("Ingresá tu nombre de usuario: ".encode("utf-8"))
+        conn.settimeout(30)
+        nombre = conn.recv(BUFFER).decode("utf-8").strip()
+        if not nombre:
+            nombre = f"Anonimo_{addr[1]}"
+    except socket.timeout:
+        nombre = f"Anonimo_{addr[1]}"
+    except (ConnectionResetError, OSError):
+        conn.close()
+        return
+
+    conn.setblocking(False)
+
+    clients[conn] = {
+        "nombre": nombre,
+        "addr": addr,
+        "muted": False
+    }
+
+    sel.register(conn, selectors.EVENT_READ, data="client")
+
+    mensaje_bienvenida = f"[{timestamp()}] *** {nombre} se unió al chat ***\n"
+    broadcast(mensaje_bienvenida, remitente=None)
+    loguear(mensaje_bienvenida.strip())
+    print(mensaje_bienvenida.strip())
+
+
+def manejar_cliente(sock):
+    try:
+        data = sock.recv(BUFFER)
 
         if not data:
-            remove_client(conn)
+            desconectar(sock, motivo="desconexión limpia")
             return
 
-        if conn not in clients:
-            # First message = username
-            clients[conn] = data
-            broadcast(f"[SYSTEM] {data} joined the chat.\n")
-            return
+        texto = data.decode("utf-8").strip()
+        nombre = clients[sock]["nombre"]
 
-        username = clients[conn]
+        if texto == "/exit":
+            desconectar(sock, motivo="salida voluntaria")
 
-        if data == "/exit":
-            remove_client(conn)
-            return
+        elif texto.startswith("/mute "):
+            objetivo_nombre = texto[6:].lstrip("@").strip()
+            objetivo_sock = next(
+                (s for s, info in clients.items() if info["nombre"] == objetivo_nombre),
+                None
+            )
+            if objetivo_sock:
+                clients[objetivo_sock]["muted"] = True
+                sock.send(f"Muteaste a {objetivo_nombre}\n".encode())
+            else:
+                sock.send(f"Usuario '{objetivo_nombre}' no encontrado.\n".encode())
 
-        if data == "/help":
-            conn.sendall("Commands: /exit, /help\n".encode())
-            return
+        else:
+            if clients[sock]["muted"]:
+                sock.send("[Estás muteado, nadie te escucha]\n".encode())
+                return
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        message = f"[{timestamp}] {username}: {data}\n"
+            mensaje = f"[{timestamp()}] {nombre}: {texto}\n"
+            broadcast(mensaje, remitente=sock)
+            loguear(mensaje.strip())
 
-        print(message.strip())
-        broadcast(message, conn)
-
-        # Log
-        with open("chat_log.txt", "a", encoding="utf-8") as f:
-            f.write(message)
-
-    except:
-        remove_client(conn)
+    except (ConnectionResetError, OSError):
+        desconectar(sock, motivo="caída inesperada")
 
 
 def main():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((HOST, PORT))
-    server_socket.listen()
-    server_socket.setblocking(False)
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_sock.bind((HOST, PORT))
+    server_sock.listen()
+    server_sock.setblocking(False)
 
-    selector.register(server_socket, selectors.EVENT_READ, accept_connection)
+    sel.register(server_sock, selectors.EVENT_READ, data="server")
+    print(f"Servidor escuchando en {PORT}...")
 
-    print(f"🚀 Server running on {HOST}:{PORT}")
-
-    while True:
-        events = selector.select()
-        for key, mask in events:
-            callback = key.data
-            callback(key.fileobj)
+    try:
+        while True:
+            eventos = sel.select(timeout=1)
+            for key, mask in eventos:
+                if key.data == "server":
+                    aceptar_cliente(key.fileobj)
+                else:
+                    manejar_cliente(key.fileobj)
+    except KeyboardInterrupt:
+        print("\nServidor detenido.")
+    finally:
+        sel.close()
+        server_sock.close()
+        log_file.close()
 
 
 if __name__ == "__main__":
