@@ -1,49 +1,50 @@
-import selectors
+# ---------- Importacion de Librerias ----------
+import selectors # Alternativa de threads. Permite manejar multiples conexiones
 import socket
-import datetime
-
-HOST = "0.0.0.0"
+import datetime 
+# ---------- Definicion de Constantes ----------
+HOST = "0.0.0.0" # Acepta conexiones desde cualquier IP
 PORT = 12345
-BUFFER = 4096
+BUFFER = 4096 # Max Bytes 
 
-clients = {}
-sel = selectors.DefaultSelector()
-log_file = open("chat.log", "a", encoding="utf-8")
+clients = {} # Guarda todos los clientes conectados 
+sel = selectors.DefaultSelector() # Crea el selector principal
+log_file = open("chat.log", "a", encoding="utf-8") # Guarda historial
 
-
+# ---------- Funcion Tiempo ----------
 def timestamp():
-    return datetime.datetime.now().strftime("%H:%M:%S")
+    return datetime.datetime.now().strftime("%H:%M:%S") # Obtiene hora actual
 
-
+# ---------- Funcion Login ----------
 def login(message):
-    log_file.write(message + "\n")
-    log_file.flush()
+    log_file.write(message + "\n") # Escribe el mensaje en el archivo
+    log_file.flush() # Fuerza escritura inmediata en el disco
 
-
+# ---------- Funcion Broadcast ----------
 def broadcast(message, sender=None):
-    muertos = []
+    muertos = [] # Lista de sockets muertos
     for sock in clients:
-        if sock != sender:
+        if sock != sender: # No se reenvia al emisor
             try:
                 sock.send(message.encode("utf-8"))
             except Exception:
-                muertos.append(sock)
+                muertos.append(sock) # Si falla, el socket esta muerto
     for sock in muertos:
-        disconnect(sock, motive="socket muerto en broadcast")
+        disconnect(sock, motive="socket muerto en broadcast") # Desconecta 
 
-
+# ---------- Funcion Desconexion ----------
 def disconnect(sock, motive="desconexión"):
     if sock in clients:
-        name = clients[sock]["nombre"]
+        name = clients[sock]["name"]
         message = f"[{timestamp()}] *** {name} abandonó el chat ({motive}) ***"
 
-        del clients[sock]
+        del clients[sock] # Elimina al cliente del diccionario
         try:
-            sel.unregister(sock)
+            sel.unregister(sock) # Elimina al socket del selector
         except Exception:
             pass
         try:
-            sock.close()
+            sock.close() # Cierra la conexion 
         except Exception:
             pass
 
@@ -51,10 +52,10 @@ def disconnect(sock, motive="desconexión"):
         login(message)
         print(f"Conexión cerrada: {name} — {motive}")
 
-
+# ---------- Funcion Aceptar Cliente ----------
 def accept_client(server_sock):
-    conn, addr = server_sock.accept()
-    conn.setblocking(True)
+    conn, addr = server_sock.accept() # Acepta nueva conexion
+    conn.setblocking(True) # Bloquea para pedir nommbre de usuario
 
     try:
         conn.send("Ingresá tu nombre de usuario: ".encode("utf-8"))
@@ -68,7 +69,7 @@ def accept_client(server_sock):
         conn.close()
         return
 
-    conn.setblocking(False)
+    conn.setblocking(False) # Desbloquea para manejo con selector
 
     clients[conn] = {
         "name": name,
@@ -76,19 +77,19 @@ def accept_client(server_sock):
         "muted": False
     }
 
-    sel.register(conn, selectors.EVENT_READ, data="client")
+    sel.register(conn, selectors.EVENT_READ, data="client") # Registra socket en selector
 
     mensaje_bienvenida = f"[{timestamp()}] *** {name} se unió al chat ***\n"
     broadcast(mensaje_bienvenida, sender=None)
     login(mensaje_bienvenida.strip())
     print(mensaje_bienvenida.strip())
 
-
+# ---------- Funcion Manejo del Cliente ----------
 def manage_client(sock):
     try:
-        data = sock.recv(BUFFER)
+        data = sock.recv(BUFFER) # Recibe datos
 
-        if not data:
+        if not data: # Cliente desconectado
             disconnect(sock, motive="desconexión limpia")
             return
 
@@ -100,7 +101,7 @@ def manage_client(sock):
 
         elif text.startswith("/mute "):
             objetivo_nombre = text[6:].lstrip("@").strip()
-            objetivo_sock = next(
+            objetivo_sock = next( # Busca socket del usuario
                 (s for s, info in clients.items() if info["name"] == objetivo_nombre),
                 None
             )
@@ -115,14 +116,14 @@ def manage_client(sock):
                 sock.send("[Estás muteado, nadie te escucha]\n".encode())
                 return
 
-            message = f"[{timestamp()}] {name}: {text}\n"
+            message = f"[{timestamp()}] {name}: {text}\n" # Crea el mensaje
             broadcast(message, sender=sock)
             login(message.strip())
 
     except (ConnectionResetError, OSError):
         disconnect(sock, motivo="caída inesperada")
 
-
+# ---------- Funcion Main ----------
 def main():
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
