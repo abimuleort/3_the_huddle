@@ -1,18 +1,18 @@
 # ---------- Importacion de Librerias ----------
 import socket
 import time
-from threading import Thread, Event
+from threading import Thread, Event # MODIFIED Se agrega Event para señalizar desconexión
 
 # ---------- Definicion de Constantes ----------
 HOST = '127.0.0.1'
 PORT = 12345
 BUFFER = 4096
-MAX_RETRIES = 10
-RETRY_DELAY = 3
+MAX_RETRIES = 10 # MODIFIED se aumenta para dar más tiempo al servidor a levantar
+RETRY_DELAY = 3  # MODIFIED Constante explícita para el tiempo entre reintentos
 
 # ---------- Estado del Cliente ----------
 saved_name = None           # Nombre guardado para reconexion automatica
-disconnected_event = Event() # Señal: se perdio la conexion
+disconnected_event = Event() # NEW LINE Señal que indica que se perdió la conexión con el servidor
 
 # ---------- Funcion Reintentos ----------
 def connect_retries():
@@ -20,7 +20,7 @@ def connect_retries():
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((HOST, PORT))
-            return sock
+            return sock # MODIFIED Ya no imprime "Conectado"; se hace en main()
         except (ConnectionRefusedError, OSError):
             print(f"\r[Reconectando... intento {attempt}/{MAX_RETRIES}]", end="", flush=True)
             time.sleep(RETRY_DELAY)
@@ -69,12 +69,6 @@ def send_messages(sock):
 
 # ---------- Funcion Handshake ----------
 def handshake(sock):
-    """
-    Recibe el prompt del servidor y responde:
-    - Con el nombre guardado si ya hubo sesion previa (reconexion silenciosa).
-    - Pidiendo nombre al usuario si es la primera vez.
-    Devuelve el nombre confirmado o None si hubo error.
-    """
     global saved_name
     try:
         # Recibir prompt del servidor

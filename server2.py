@@ -2,20 +2,21 @@
 import selectors  # Permite manejar multiples conexiones al mismo tiempo
 import socket
 import datetime   # Permite trabajar con fecha y hora
-import json       # Para guardar/cargar estado de clientes
-import os         # Para verificar existencia de archivos
+import json       # NEW LINE Para guardar/cargar estado de clientes
+import os         # NEW LINE Para verificar existencia de archivos
 
 # ---------- Definicion de Constantes ----------
 HOST = "0.0.0.0"         # Acepta conexiones desde cualquier IP
 PORT = 12345              # Puerto del servidor
 BUFFER = 4096             # Tamaño del buffer para recibir mensajes
-STATE_FILE = "clients_state.json"  # Archivo de estado persistente
+STATE_FILE = "clients_state.json"  # NEW LINE Archivo donde se persiste el estado de los clientes
 
 clients = {}                                        # Guarda todos los clientes conectados
 sel = selectors.DefaultSelector()                   # Crea el selector principal
 log_file = open("chat.log", "a", encoding="utf-8")  # Guarda historial
 
 # ---------- Carga de Estado Previo ----------
+# NEW FUNCTION: Lee el archivo de estado al iniciar para conocer clientes de sesiones anteriores
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -24,7 +25,7 @@ def load_state():
         except Exception:
             pass
     return {}
-
+# NEW FUNCTION: Guarda el estado actual de todos los clientes conectados en disco
 def save_state():
     state = {}
     for sock, info in clients.items():
@@ -70,7 +71,7 @@ def disconnect(sock, motive="desconexión"):
         sock.close()
     except Exception:
         pass
-    save_state()
+    save_state() # NEW LINE Persiste el estado actualizado cada vez que un cliente se desconecta
     broadcast(message)
     login(message)
     print(message)
@@ -93,13 +94,13 @@ def accept_client(server_sock):
         return
 
     # Verificar si el nombre corresponde a un cliente previo
-    if name in previous_state:
-        muted = previous_state[name].get("muted", False)
-        is_reconnect = True
+    if name in previous_state:                            # NEW LINE Verifica si el nombre recibido pertenece a un cliente de una sesión previa
+        muted = previous_state[name].get("muted", False)  # NEW LINE Restaura el estado de muteo del cliente
+        is_reconnect = True                               # NEW LINE Marca que este cliente es una reconexión
     else:
         muted = False
         is_reconnect = False
-
+# NEW LINE Notifica al cliente si fue reconocido como sesión previa o es nuevo
     conn.setblocking(False)
     clients[conn] = {"name": name, "addr": addr, "muted": muted}
     sel.register(conn, selectors.EVENT_READ, data="client")
@@ -109,9 +110,9 @@ def accept_client(server_sock):
     try:
         conn.setblocking(True)
         if is_reconnect:
-            conn.send(f"OK_RECONNECT:{name}\n".encode("utf-8"))
+            conn.send(f"OK_RECONNECT:{name}\n".encode("utf-8")) # NEW LINE se omite pedir nombre al usuario
         else:
-            conn.send(f"OK_NEW:{name}\n".encode("utf-8"))
+            conn.send(f"OK_NEW:{name}\n".encode("utf-8"))       # NEW LINE se confirma ingreso al usuario
         conn.setblocking(False)
     except Exception:
         pass
@@ -172,6 +173,7 @@ def main():
     server_sock.setblocking(False)
     sel.register(server_sock, selectors.EVENT_READ, data="server")
 
+    # NEW LINE Si hay sesión previa, muestra los nombres de los clientes que pueden reconectarse
     if previous_state:
         nombres = list(previous_state.keys())
         print(f"Servidor escuchando en {PORT}... (sesión previa con: {', '.join(nombres)})")
